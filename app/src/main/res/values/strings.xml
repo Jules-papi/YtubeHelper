@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">YouTube Overlay</string>
+    <string name="accessibility_service_description">Used to detect when YouTube is open to show the overlay.</string>
+</resources>

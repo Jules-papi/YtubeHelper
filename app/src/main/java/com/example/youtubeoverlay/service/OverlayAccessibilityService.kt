@@ -101,15 +101,19 @@ class OverlayAccessibilityService : AccessibilityService() {
                     throw Exception("Could not find Share button.")
                 }
 
-                // Step 2: Wait longer for the heavy OEM/YouTube Share Sheet (Bottom Sheet) to fully animate and populate
-                delay(2000)
+                // Step 2 & 3: Polling mechanism to wait for the Share Sheet (Bottom Sheet) to fully animate and populate
+                var copyClicked = false
+                val maxAttempts = 8 // Wait up to 4 seconds (8 * 500ms)
+                for (i in 1..maxAttempts) {
+                    delay(500)
+                    copyClicked = clickCopyLinkButton()
+                    if (copyClicked) break
+                }
 
-                // Step 3: Find and click 'Copy link' inside the dynamic share sheet
-                val copyClicked = clickCopyLinkButton()
                 if (!copyClicked) {
                      // Try closing the bottom sheet to recover state if possible
                      performGlobalAction(GLOBAL_ACTION_BACK)
-                     throw Exception("Could not find Copy Link button in the Share Sheet.")
+                     throw Exception("Could not find Copy Link button in the Share Sheet after waiting.")
                 }
 
                 // Step 4: Fallback to reading the accessibility nodes directly to grab the URL if possible

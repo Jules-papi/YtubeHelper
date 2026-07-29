@@ -28,6 +28,8 @@ class MainApplication : Application(), Configuration.Provider {
             try {
                 YoutubeDL.getInstance().init(this@MainApplication)
                 FFmpeg.getInstance().init(this@MainApplication)
+                // Force update yt-dlp binary to handle YouTube's latest signature cipher changes
+                YoutubeDL.getInstance().updateYoutubeDL(this@MainApplication)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

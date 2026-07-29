@@ -24,7 +24,36 @@ class DownloadWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel("download_channel", "Downloads", android.app.NotificationManager.IMPORTANCE_LOW)
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.Notification.Builder(applicationContext, "download_channel")
+        } else {
+            android.app.Notification.Builder(applicationContext)
+        }
+
+        val notification = builder
+            .setContentTitle("Preparing Download...")
+            .setContentText("Initializing...")
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setOngoing(true)
+            .build()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(id.hashCode(), notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(id.hashCode(), notification)
+        }
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        setForeground(getForegroundInfo())
+
         val url = inputData.getString("url") ?: return@withContext Result.failure()
         val typeStr = inputData.getString("type") ?: return@withContext Result.failure()
         val type = YouTubeMediaExtractor.DownloadType.valueOf(typeStr)
@@ -43,9 +72,11 @@ class DownloadWorker @AssistedInject constructor(
 
             // Clean up temporary unique directory
             tmpDir.deleteRecursively()
+            updateNotification("Download Complete!", 100)
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()
+            updateNotification("Download Failed: ${e.localizedMessage}", 0)
             Result.failure()
         }
     }

@@ -29,7 +29,10 @@ class DownloadQueueTest {
     fun setup() {
         MockKAnnotations.init(this)
         every { workerParams.taskExecutor } returns mockk(relaxed = true)
+        every { context.getSystemService(Context.NOTIFICATION_SERVICE) } returns mockk<android.app.NotificationManager>(relaxed = true)
         worker = spyk(DownloadWorker(context, workerParams))
+        coEvery { worker.setForeground(any()) } returns Unit
+        coEvery { worker.getForegroundInfo() } returns mockk(relaxed = true)
     }
 
     @After

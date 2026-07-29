@@ -101,15 +101,15 @@ class OverlayAccessibilityService : AccessibilityService() {
                     throw Exception("Could not find Share button.")
                 }
 
-                // Step 2: Wait a bit for the bottom sheet to animate in
-                delay(1000)
+                // Step 2: Wait longer for the heavy OEM/YouTube Share Sheet (Bottom Sheet) to fully animate and populate
+                delay(2000)
 
-                // Step 3: Find and click 'Copy link'
+                // Step 3: Find and click 'Copy link' inside the dynamic share sheet
                 val copyClicked = clickCopyLinkButton()
                 if (!copyClicked) {
                      // Try closing the bottom sheet to recover state if possible
                      performGlobalAction(GLOBAL_ACTION_BACK)
-                     throw Exception("Could not find Copy Link button.")
+                     throw Exception("Could not find Copy Link button in the Share Sheet.")
                 }
 
                 // Step 4: Fallback to reading the accessibility nodes directly to grab the URL if possible
@@ -214,15 +214,41 @@ class OverlayAccessibilityService : AccessibilityService() {
     private fun clickCopyLinkButton(): Boolean {
         val root = rootInActiveWindow ?: return false
 
-        // 1. Try View ID matching
-        val copyNodes = root.findAccessibilityNodeInfosByViewId("com.google.android.youtube:id/copy_button")
-        for (node in copyNodes) {
-             if (performClickOnNode(node)) return true
+        // 1. Try View ID matching for known Youtube or Android Chooser IDs
+        val possibleIds = listOf(
+            "com.google.android.youtube:id/copy_button", // Older YouTube direct share
+            "android:id/chooser_row_text_option",        // Standard Android chooser row
+            "android:id/text1"                           // Generic Android list item
+        )
+
+        for (id in possibleIds) {
+            val copyNodes = root.findAccessibilityNodeInfosByViewId(id)
+            for (node in copyNodes) {
+                // If it's a generic ID, verify text contains copy keywords before clicking
+                if (id == "android:id/chooser_row_text_option" || id == "android:id/text1") {
+                    val text = node.text?.toString()
+                    val desc = node.contentDescription?.toString()
+                    val isCopy = isCopyKeyword(text) || isCopyKeyword(desc)
+                    if (isCopy && performClickOnNode(node)) return true
+                } else {
+                    if (performClickOnNode(node)) return true
+                }
+            }
         }
 
-        // 2. Deep recursive search for Text
-        val possibleTexts = listOf("Copy link", "Bağlantıyı kopyala", "Copy", "Kopyala")
+        // 2. Broad and Deep recursive search for Text (across all OEM share sheets)
+        // These words cover primary intents seen in Samsung, Xiaomi, Pixel Android implementations.
+        val possibleTexts = listOf(
+            "Copy link", "Bağlantıyı kopyala", "Copy", "Kopyala", "Kopyalayın", "Copiar enlace",
+            "Copier le lien", "Link kopieren", "Panoya kopyala", "Copy to clipboard"
+        )
         return findAndClickByKeywords(root, possibleTexts)
+    }
+
+    private fun isCopyKeyword(text: String?): Boolean {
+        if (text == null) return false
+        val keywords = listOf("Copy", "Kopyala", "Copiar", "Copier", "kopieren")
+        return keywords.any { text.contains(it, ignoreCase = true) }
     }
 
     private fun isShareKeyword(text: String?): Boolean {

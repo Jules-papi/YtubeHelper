@@ -149,17 +149,23 @@ class OverlayWindowService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     lateinit var youTubeMediaExtractor: com.example.youtubeoverlay.worker.YouTubeMediaExtractor
 
     private fun handleAction(action: String) {
-        if (currentUrl == null) {
-            Toast.makeText(this, "Please tap Share on the YouTube video and select YouTube Helper first!", Toast.LENGTH_LONG).show()
-        } else {
-            Toast.makeText(this, "Starting $action download for $currentUrl", Toast.LENGTH_SHORT).show()
-            val downloadType = when (action) {
-                "Thumbnail" -> com.example.youtubeoverlay.worker.YouTubeMediaExtractor.DownloadType.THUMBNAIL
-                "MP3" -> com.example.youtubeoverlay.worker.YouTubeMediaExtractor.DownloadType.MP3
-                "MP4" -> com.example.youtubeoverlay.worker.YouTubeMediaExtractor.DownloadType.MP4
-                else -> return
-            }
+        val downloadType = when (action) {
+            "Thumbnail" -> com.example.youtubeoverlay.worker.YouTubeMediaExtractor.DownloadType.THUMBNAIL
+            "MP3" -> com.example.youtubeoverlay.worker.YouTubeMediaExtractor.DownloadType.MP3
+            "MP4" -> com.example.youtubeoverlay.worker.YouTubeMediaExtractor.DownloadType.MP4
+            else -> return
+        }
+
+        if (currentUrl != null) {
+            // We have a URL already saved via system share sheet
+            Toast.makeText(this, "Starting $action download for cached URL", Toast.LENGTH_SHORT).show()
             youTubeMediaExtractor.dispatchDownload(currentUrl!!, downloadType)
+        } else {
+            // Trigger the macro directly to fetch the active video
+            val intent = Intent(OverlayAccessibilityService.ACTION_START_MACRO)
+            intent.setPackage(packageName) // Explicit broadcast for API 34+ restrictions
+            intent.putExtra(OverlayAccessibilityService.EXTRA_DOWNLOAD_TYPE, action)
+            sendBroadcast(intent)
         }
     }
 

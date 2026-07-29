@@ -30,7 +30,9 @@ class DownloadWorker @AssistedInject constructor(
         val type = YouTubeMediaExtractor.DownloadType.valueOf(typeStr)
 
         try {
-            val tmpDir = File(applicationContext.cacheDir, "yt_downloads")
+            // Use unique directory per job to prevent file race conditions across concurrent downloads
+            val jobId = id.toString()
+            val tmpDir = File(applicationContext.cacheDir, "yt_downloads_$jobId")
             if (!tmpDir.exists()) tmpDir.mkdirs()
 
             when (type) {
@@ -38,6 +40,9 @@ class DownloadWorker @AssistedInject constructor(
                 YouTubeMediaExtractor.DownloadType.MP3 -> downloadAudio(url, tmpDir)
                 YouTubeMediaExtractor.DownloadType.MP4 -> downloadVideo(url, tmpDir)
             }
+
+            // Clean up temporary unique directory
+            tmpDir.deleteRecursively()
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -112,7 +117,16 @@ class DownloadWorker @AssistedInject constructor(
             Environment.DIRECTORY_PICTURES -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             Environment.DIRECTORY_MUSIC -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
             Environment.DIRECTORY_MOVIES -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            else -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            else -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                } else {
+                    // Fallback for API < 29, usually we'd avoid this branch entirely for MediaStore.Downloads
+                    // or use a custom Downloads path, but for safety in generic logic we can just use
+                    // a more general URI or the Video/Audio URI based on MIME type.
+                    MediaStore.Files.getContentUri("external")
+                }
+            }
         }
 
         val uri = resolver.insert(collectionUri, contentValues)

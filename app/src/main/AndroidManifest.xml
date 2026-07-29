@@ -44,6 +44,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ClipboardActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
         <service
             android:name=".service.OverlayAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

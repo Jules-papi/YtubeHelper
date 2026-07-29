@@ -116,39 +116,18 @@ class OverlayAccessibilityService : AccessibilityService() {
                      throw Exception("Could not find Copy Link button in the Share Sheet after waiting.")
                 }
 
-                // Step 4: Fallback to reading the accessibility nodes directly to grab the URL if possible
-                // since Android 10+ restricts clipboard access from background services unless they are default IME.
-                // However, Accessibility Services *can* sometimes read the clipboard or node text.
-                // Let's try capturing the text from the node itself after "Copy link" is clicked.
+                // Step 4: Bypass Android 10+ Background Clipboard Restrictions.
+                // We launch our Transparent ClipboardActivity with FLAG_ACTIVITY_NEW_TASK so it briefly
+                // takes foreground focus to safely read the clipboard.
+                // It finishes instantly and routes to WorkManager.
+                delay(500) // Small wait for system copy to hit clipboard
 
-                // Wait for the OS to hopefully copy it.
-                delay(500)
-
-                var url = ClipboardUtils.getClipboardText(this@OverlayAccessibilityService)
-
-                // Fallback: Try reading the node directly if Clipboard is blocked (Android 10+)
-                if (url == null) {
-                    val root = rootInActiveWindow
-                    if (root != null) {
-                        val allNodes = mutableListOf<AccessibilityNodeInfo>()
-                        getAllNodes(root, allNodes)
-                        for (node in allNodes) {
-                            val text = node.text?.toString()
-                            if (ClipboardUtils.isYouTubeUrl(text)) {
-                                url = text
-                                break
-                            }
-                        }
-                    }
+                val intent = Intent(this@OverlayAccessibilityService, com.example.youtubeoverlay.ClipboardActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    putExtra(com.example.youtubeoverlay.ClipboardActivity.EXTRA_DOWNLOAD_TYPE, downloadType)
                 }
 
-                if (ClipboardUtils.isYouTubeUrl(url)) {
-                    val finalUrl = extractUrl(url!!)
-                    Toast.makeText(this@OverlayAccessibilityService, "URL Extracted. Starting Download!", Toast.LENGTH_SHORT).show()
-                    dispatchDownloadTask(finalUrl, downloadType)
-                } else {
-                    Toast.makeText(this@OverlayAccessibilityService, "Could not extract automatically. Please share video manually.", Toast.LENGTH_LONG).show()
-                }
+                startActivity(intent)
 
             } catch (e: Exception) {
                 Toast.makeText(this@OverlayAccessibilityService, "Macro failed: ${e.message}", Toast.LENGTH_LONG).show()

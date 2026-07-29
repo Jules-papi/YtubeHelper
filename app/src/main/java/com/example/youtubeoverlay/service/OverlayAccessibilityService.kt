@@ -120,11 +120,28 @@ class OverlayAccessibilityService : AccessibilityService() {
                 // Wait for the OS to hopefully copy it.
                 delay(500)
 
-                val url = ClipboardUtils.getClipboardText(this@OverlayAccessibilityService)
+                var url = ClipboardUtils.getClipboardText(this@OverlayAccessibilityService)
+
+                // Fallback: Try reading the node directly if Clipboard is blocked (Android 10+)
+                if (url == null) {
+                    val root = rootInActiveWindow
+                    if (root != null) {
+                        val allNodes = mutableListOf<AccessibilityNodeInfo>()
+                        getAllNodes(root, allNodes)
+                        for (node in allNodes) {
+                            val text = node.text?.toString()
+                            if (ClipboardUtils.isYouTubeUrl(text)) {
+                                url = text
+                                break
+                            }
+                        }
+                    }
+                }
 
                 if (ClipboardUtils.isYouTubeUrl(url)) {
+                    val finalUrl = extractUrl(url!!)
                     Toast.makeText(this@OverlayAccessibilityService, "URL Extracted. Starting Download!", Toast.LENGTH_SHORT).show()
-                    dispatchDownloadTask(url!!, downloadType)
+                    dispatchDownloadTask(finalUrl, downloadType)
                 } else {
                     Toast.makeText(this@OverlayAccessibilityService, "Could not extract automatically. Please share video manually.", Toast.LENGTH_LONG).show()
                 }
@@ -134,6 +151,22 @@ class OverlayAccessibilityService : AccessibilityService() {
             } finally {
                 isMacroRunning = false
                 pendingDownloadType = null
+            }
+        }
+    }
+
+    private fun extractUrl(text: String): String {
+        val urlRegex = "https?://[a-zA-Z0-9./?=_-]+".toRegex()
+        val matchResult = urlRegex.find(text)
+        return matchResult?.value ?: text
+    }
+
+    private fun getAllNodes(root: AccessibilityNodeInfo, list: MutableList<AccessibilityNodeInfo>) {
+        list.add(root)
+        for (i in 0 until root.childCount) {
+            val child = root.getChild(i)
+            if (child != null) {
+                getAllNodes(child, list)
             }
         }
     }
@@ -151,51 +184,92 @@ class OverlayAccessibilityService : AccessibilityService() {
     private fun clickShareButton(): Boolean {
         val root = rootInActiveWindow ?: return false
 
-        // Search by content description first (often more reliable for icon buttons)
-        val shareNodesByDesc = root.findAccessibilityNodeInfosByText("Share")
-        for (node in shareNodesByDesc) {
-             if (node.isClickable) {
-                 node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                 return true
-             } else if (node.parent?.isClickable == true) {
-                 node.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                 return true
-             }
+        // Scroll horizontally or vertically a bit if the share button isn't immediately visible
+        // We will perform a swipe gesture programmatically in case it's offscreen
+        // Only on modern APIs for quick scrolling tests, or we can just ignore since the deep
+        // traversal usually gets it. We'll stick to DOM parsing to avoid unexpected skips.
+        // Removed unimplemented GLOBAL_ACTION_SCROLL_FORWARD for API compat
+
+        // 1. Try View ID matching for YouTube Share Buttons (Shorts or Standard Video)
+        val possibleIds = listOf(
+            "com.google.android.youtube:id/share_button",
+            "com.google.android.youtube:id/button_icon" // Often used in horizontal scroll lists
+        )
+
+        for (id in possibleIds) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            for (node in nodes) {
+                // If it's a generic button_icon, verify its content description
+                if (id.contains("button_icon") && !isShareKeyword(node.contentDescription?.toString())) {
+                    continue
+                }
+                if (performClickOnNode(node)) return true
+            }
         }
 
-        // Search for 'Paylaş' (Turkish support)
-        val shareNodesTR = root.findAccessibilityNodeInfosByText("Paylaş")
-        for (node in shareNodesTR) {
-             if (node.isClickable) {
-                 node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                 return true
-             } else if (node.parent?.isClickable == true) {
-                 node.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                 return true
-             }
-        }
-
-        return false
+        // 2. Deep recursive search for contentDescription / Text
+        return findAndClickByKeywords(root, listOf("Share", "Paylaş", "Compartir", "Partager", "Teilen"))
     }
 
     private fun clickCopyLinkButton(): Boolean {
         val root = rootInActiveWindow ?: return false
 
-        val possibleTexts = listOf("Copy link", "Bağlantıyı kopyala", "Copy")
-
-        for (text in possibleTexts) {
-             val nodes = root.findAccessibilityNodeInfosByText(text)
-             for (node in nodes) {
-                 if (node.isClickable) {
-                     node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                     return true
-                 } else if (node.parent?.isClickable == true) {
-                     node.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                     return true
-                 }
-             }
+        // 1. Try View ID matching
+        val copyNodes = root.findAccessibilityNodeInfosByViewId("com.google.android.youtube:id/copy_button")
+        for (node in copyNodes) {
+             if (performClickOnNode(node)) return true
         }
 
+        // 2. Deep recursive search for Text
+        val possibleTexts = listOf("Copy link", "Bağlantıyı kopyala", "Copy", "Kopyala")
+        return findAndClickByKeywords(root, possibleTexts)
+    }
+
+    private fun isShareKeyword(text: String?): Boolean {
+        if (text == null) return false
+        val keywords = listOf("Share", "Paylaş", "Compartir", "Partager", "Teilen")
+        return keywords.any { text.contains(it, ignoreCase = true) }
+    }
+
+    private fun findAndClickByKeywords(root: AccessibilityNodeInfo, keywords: List<String>): Boolean {
+        // Broad search using built-in text search
+        for (keyword in keywords) {
+            val nodes = root.findAccessibilityNodeInfosByText(keyword)
+            for (node in nodes) {
+                if (performClickOnNode(node)) return true
+            }
+        }
+
+        // Manual recursive traversal as a final fallback
+        return traverseAndClick(root, keywords)
+    }
+
+    private fun traverseAndClick(node: AccessibilityNodeInfo, keywords: List<String>): Boolean {
+        val text = node.text?.toString()
+        val desc = node.contentDescription?.toString()
+
+        if (keywords.any { text?.contains(it, ignoreCase = true) == true || desc?.contains(it, ignoreCase = true) == true }) {
+            if (performClickOnNode(node)) return true
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                if (traverseAndClick(child, keywords)) return true
+            }
+        }
+        return false
+    }
+
+    private fun performClickOnNode(node: AccessibilityNodeInfo): Boolean {
+        if (node.isClickable) {
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            return true
+        }
+        if (node.parent?.isClickable == true) {
+            node.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            return true
+        }
         return false
     }
 

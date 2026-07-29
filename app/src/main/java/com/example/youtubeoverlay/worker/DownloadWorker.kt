@@ -70,8 +70,9 @@ class DownloadWorker @AssistedInject constructor(
         request.addOption("--audio-quality", "0")
         request.addOption("-o", "${tmpDir.absolutePath}/%(title)s.%(ext)s")
 
+        updateNotification("Downloading Audio", 0)
         YoutubeDL.getInstance().execute(request) { progress, etaInSeconds, line ->
-            // Update progress if needed
+            updateNotification("Downloading Audio...", progress.toInt())
         }
 
         // Find downloaded mp3 file and move it
@@ -86,14 +87,41 @@ class DownloadWorker @AssistedInject constructor(
         request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
         request.addOption("-o", "${tmpDir.absolutePath}/%(title)s.%(ext)s")
 
+        updateNotification("Downloading Video", 0)
         YoutubeDL.getInstance().execute(request) { progress, etaInSeconds, line ->
-            // Update progress if needed
+            updateNotification("Downloading Video...", progress.toInt())
         }
 
         val downloadedFile = tmpDir.listFiles()?.find { it.extension == "mp4" }
         downloadedFile?.let {
             moveToMediaStore(it, "video/mp4", Environment.DIRECTORY_MOVIES)
         }
+    }
+
+    private fun updateNotification(title: String, progress: Int) {
+        val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel("download_channel", "Downloads", android.app.NotificationManager.IMPORTANCE_LOW)
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.Notification.Builder(applicationContext, "download_channel")
+        } else {
+            android.app.Notification.Builder(applicationContext)
+        }
+
+        val notification = builder
+            .setContentTitle(title)
+            .setContentText("Progress: $progress%")
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setProgress(100, progress, false)
+            .setOngoing(true)
+            .build()
+
+        // Assuming unique ID per job for simplicity
+        notificationManager.notify(id.hashCode(), notification)
     }
 
     private fun extractVideoId(url: String): String? {
